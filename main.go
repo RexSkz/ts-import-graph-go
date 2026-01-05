@@ -74,7 +74,17 @@ func main() {
 		panic(err)
 	}
 
-	printGraphviz(graph)
+	ignoreExternals := false
+	format := "graphviz"
+	for _, a := range os.Args[2:] {
+		if a == "--ignore-externals" {
+			ignoreExternals = true
+		}
+	}
+
+	if format == "graphviz" {
+		printGraphviz(graph, ignoreExternals)
+	}
 }
 
 func isTSFile(path string) bool {
@@ -246,22 +256,31 @@ func getModule(path string) string {
 	return trimLastDirRe.ReplaceAllString(result, "")
 }
 
-func findRoots(graph Graph) map[string]bool {
+func findRoots(graph Graph, ignoreExternals bool) map[string]bool {
 	inDegree := make(map[string]int)
 
 	for node := range graph {
+		if ignoreExternals && isExternalModule(node) {
+			continue
+		}
 		inDegree[node] = 0
 	}
 
 	for node := range graph {
+		if ignoreExternals && isExternalModule(node) {
+			continue
+		}
 		for target := range graph[node] {
+			if ignoreExternals && isExternalModule(target) {
+				continue
+			}
 			inDegree[target]++
 		}
 	}
 
 	roots := make(map[string]bool)
 	for node, degree := range inDegree {
-		if degree == 0 && !isExternalModule(node) {
+		if degree == 0 {
 			roots[node] = true
 		}
 	}
@@ -275,19 +294,28 @@ func isExternalModule(node string) bool {
 	return strings.Contains(node, "..")
 }
 
-func computeRanks(graph Graph, roots map[string]bool) map[string]int {
+func computeRanks(graph Graph, roots map[string]bool, ignoreExternals bool) map[string]int {
 	inDegree := make(map[string]int)
 	allNodes := make(map[string]bool)
 
 	for node := range graph {
+		if ignoreExternals && isExternalModule(node) {
+			continue
+		}
 		allNodes[node] = true
 		inDegree[node] = 0
 	}
 
 	for node := range graph {
+		if ignoreExternals && isExternalModule(node) {
+			continue
+		}
 		for target := range graph[node] {
+			if ignoreExternals && isExternalModule(target) {
+				continue
+			}
 			allNodes[target] = true
-			inDegree[node]++
+			inDegree[target]++
 		}
 	}
 
@@ -313,6 +341,9 @@ func computeRanks(graph Graph, roots map[string]bool) map[string]int {
 		})
 		for _, node := range queue {
 			for target := range graph[node] {
+				if ignoreExternals && isExternalModule(target) {
+					continue
+				}
 				inDegree[target]--
 				if enqueued[target] {
 					continue
@@ -378,9 +409,9 @@ func isBackEdge(graph Graph, ranks map[string]int, from, to string) bool {
 	return toRank < fromRank
 }
 
-func printGraphviz(graph Graph) {
-	roots := findRoots(graph)
-	ranks := computeRanks(graph, roots)
+func printGraphviz(graph Graph, ignoreExternals bool) {
+	roots := findRoots(graph, ignoreExternals)
+	ranks := computeRanks(graph, roots, ignoreExternals)
 
 	fmt.Println("digraph G {")
 	fmt.Println(`  rankdir=LR;`)
@@ -413,10 +444,18 @@ func printGraphviz(graph Graph) {
 	}
 
 	for from, targets := range graph {
+		if ignoreExternals && isExternalModule(from) {
+			continue
+		}
 		if len(targets) == 0 {
-			fmt.Printf(`  "%s";`+"\n", from)
+			if !ignoreExternals || !isExternalModule(from) {
+				fmt.Printf(`  "%s";`+"\n", from)
+			}
 		}
 		for to := range targets {
+			if ignoreExternals && isExternalModule(to) {
+				continue
+			}
 			if isBackEdge(graph, ranks, from, to) {
 				fmt.Printf(`  "%s" -> "%s" [color=red style=dashed];`+"\n", from, to)
 			} else {
