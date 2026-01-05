@@ -28,16 +28,31 @@ type TsconfigJSON struct {
 	CompilerOptions TsconfigCompilerOptions `json:"compilerOptions"`
 }
 
-var trimLastDirRe = regexp.MustCompile("/(?:components?|hooks?|store|utils?)(?:/.+)?$")
+var trimLastDirConfig = []struct{
+	orig    string
+	replace string
+}{
+	{ "((?:components|hooks|store|utils?)/[^/]+)(?:/.+)?$", "$1" },
+}
+var trimLastDirRe = make([]struct{
+	orig    *regexp.Regexp
+	replace string
+}, len(trimLastDirConfig))
+
 var typeOnlyRe = regexp.MustCompile(`\btype\b`)
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: ts-import-graph-go <project-root> [--format=graphviz|mermaid] [--ignore-externals] [--print-file-count]")
+		fmt.Println("Usage: ts-import-graph-go <project-root> [--ignore-externals] [--print-file-count]")
 		os.Exit(1)
 	}
 
 	root := filepath.Clean(os.Args[1])
+
+	for i, item := range trimLastDirConfig {
+		trimLastDirRe[i].orig = regexp.MustCompile(item.orig)
+		trimLastDirRe[i].replace = item.replace
+	}
 
 	// Read tsconfig.json if it exists
 	tsconfigPath := filepath.Join(root, "tsconfig.json")
@@ -262,8 +277,11 @@ func normalize(path string) string {
 }
 
 func getModule(path string) string {
-	result := normalize(filepath.Dir(path))
-	return trimLastDirRe.ReplaceAllString(result, "")
+	result := normalize(path)
+	for _, item := range trimLastDirRe {
+		result = item.orig.ReplaceAllString(result, item.replace)
+	}
+	return result
 }
 
 func findRoots(graph Graph, ignoreExternals bool) map[string]bool {
