@@ -29,6 +29,7 @@ type TsconfigJSON struct {
 }
 
 var trimLastDirRe = regexp.MustCompile("/(?:components?|hooks?|store|utils?)(?:/.+)?$")
+var typeOnlyRe = regexp.MustCompile(`\btype\b`)
 
 func main() {
 	if len(os.Args) < 2 {
@@ -123,6 +124,18 @@ func parseFile(root, filePath string, graph Graph, paths map[string][]string, ba
 			break
 		}
 		for _, cap := range m.Captures {
+			// Skip imports that are type-only (e.g. `import type ...` or `import { type Foo } from '...'`)
+			node := cap.Node
+			for node != nil && node.Type() != "import_statement" && node.Type() != "call_expression" && node.Type() != "export_statement" {
+				node = node.Parent()
+			}
+			if node != nil && (node.Type() == "import_statement" || node.Type() == "export_statement") {
+				seg := src[node.StartByte():cap.Node.StartByte()]
+				if typeOnlyRe.Match(seg) {
+					continue
+				}
+			}
+
 			raw := string(src[cap.Node.StartByte()+1 : cap.Node.EndByte()-1])
 			to := resolveImport(root, filePath, raw, paths, baseUrl)
 			if to != "" {
