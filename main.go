@@ -33,7 +33,7 @@ var typeOnlyRe = regexp.MustCompile(`\btype\b`)
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: ts-import-graph-go <project-root> [--format=graphviz|mermaid]")
+		fmt.Println("Usage: ts-import-graph-go <project-root> [--format=graphviz|mermaid] [--ignore-externals] [--print-file-count]")
 		os.Exit(1)
 	}
 
@@ -56,6 +56,7 @@ func main() {
 	}
 
 	graph := make(Graph)
+	fileCounts := make(map[string]int)
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -65,7 +66,7 @@ func main() {
 			return nil
 		}
 		if isTSFile(path) {
-			parseFile(root, path, graph, paths, baseUrl)
+			parseFile(root, path, graph, paths, baseUrl, fileCounts)
 		}
 		return nil
 	})
@@ -75,15 +76,22 @@ func main() {
 	}
 
 	ignoreExternals := false
+	printFileCount := false
 	format := "graphviz"
 	for _, a := range os.Args[2:] {
 		if a == "--ignore-externals" {
 			ignoreExternals = true
 		}
+		if a == "--print-file-count" {
+			printFileCount = true
+		}
+		if strings.HasPrefix(a, "--format=") {
+			format = strings.TrimPrefix(a, "--format=")
+		}
 	}
 
 	if format == "graphviz" {
-		printGraphviz(graph, ignoreExternals)
+		printGraphviz(graph, ignoreExternals, printFileCount, fileCounts)
 	}
 }
 
@@ -91,7 +99,7 @@ func isTSFile(path string) bool {
 	return strings.HasSuffix(path, ".ts") || strings.HasSuffix(path, ".tsx")
 }
 
-func parseFile(root, filePath string, graph Graph, paths map[string][]string, baseUrl string) {
+func parseFile(root, filePath string, graph Graph, paths map[string][]string, baseUrl string, fileCounts map[string]int) {
 	src, err := os.ReadFile(filePath)
 	if err != nil {
 		return
@@ -111,6 +119,8 @@ func parseFile(root, filePath string, graph Graph, paths map[string][]string, ba
 	if _, ok := graph[relFromModule]; !ok {
 		graph[relFromModule] = make(map[string]bool)
 	}
+	// count files per module
+	fileCounts[relFromModule]++
 
 	query := `
 	(
@@ -412,7 +422,7 @@ func isBackEdge(ranks map[string]int, from, to string) bool {
 	return ranks[to] < ranks[from]
 }
 
-func printGraphviz(graph Graph, ignoreExternals bool) {
+func printGraphviz(graph Graph, ignoreExternals bool, printFileCount bool, fileCounts map[string]int) {
 	roots := findRoots(graph, ignoreExternals)
 	ranks := computeRanks(graph, roots, ignoreExternals)
 
@@ -434,12 +444,16 @@ func printGraphviz(graph Graph, ignoreExternals bool) {
 		if nodes, ok := rankGroups[rank]; ok {
 			fmt.Printf("  /* %d */ { rank=same; ", rank)
 			for _, node := range nodes {
+				disp := node
+				if printFileCount {
+					disp = fmt.Sprintf("%s (%d)", node, fileCounts[node])
+				}
 				if roots[node] {
-					fmt.Printf(`"%s" [color=green style=filled fillcolor=lightgreen]; `, node)
+					fmt.Printf(`"%s" [color=green style=filled fillcolor=lightgreen]; `, disp)
 				} else if strings.HasPrefix(node, "..") {
-					fmt.Printf(`"%s" [color=yellow style=filled fillcolor=lightyellow]; `, node)
+					fmt.Printf(`"%s" [color=yellow style=filled fillcolor=lightyellow]; `, disp)
 				} else {
-					fmt.Printf(`"%s"; `, node)
+					fmt.Printf(`"%s"; `, disp)
 				}
 			}
 			fmt.Println("}")
@@ -450,19 +464,27 @@ func printGraphviz(graph Graph, ignoreExternals bool) {
 		if ignoreExternals && isExternalModule(from) {
 			continue
 		}
+		fromDisp := from
+		if printFileCount {
+			fromDisp = fmt.Sprintf("%s (%d)", from, fileCounts[from])
+		}
 		if len(targets) == 0 {
 			if !ignoreExternals || !isExternalModule(from) {
-				fmt.Printf(`  "%s";`+"\n", from)
+				fmt.Printf(`  "%s";`+"\n", fromDisp)
 			}
 		}
 		for to := range targets {
 			if ignoreExternals && isExternalModule(to) {
 				continue
 			}
+			toDisp := to
+			if printFileCount {
+				toDisp = fmt.Sprintf("%s (%d)", to, fileCounts[to])
+			}
 			if isBackEdge(ranks, from, to) {
-				fmt.Printf(`  "%s" -> "%s" [color=red style=dashed];`+"\n", from, to)
+				fmt.Printf(`  "%s" -> "%s" [color=red style=dashed];`+"\n", fromDisp, toDisp)
 			} else {
-				fmt.Printf(`  "%s" -> "%s";`+"\n", from, to)
+				fmt.Printf(`  "%s" -> "%s";`+"\n", fromDisp, toDisp)
 			}
 		}
 	}
