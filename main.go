@@ -296,6 +296,7 @@ func isExternalModule(node string) bool {
 
 func computeRanks(graph Graph, roots map[string]bool, ignoreExternals bool) map[string]int {
 	inDegree := make(map[string]int)
+	outDegree := make(map[string]int)
 	allNodes := make(map[string]bool)
 
 	for node := range graph {
@@ -304,6 +305,7 @@ func computeRanks(graph Graph, roots map[string]bool, ignoreExternals bool) map[
 		}
 		allNodes[node] = true
 		inDegree[node] = 0
+		outDegree[node] = 0
 	}
 
 	for node := range graph {
@@ -316,6 +318,7 @@ func computeRanks(graph Graph, roots map[string]bool, ignoreExternals bool) map[
 			}
 			allNodes[target] = true
 			inDegree[target]++
+			outDegree[node]++
 		}
 	}
 
@@ -345,6 +348,7 @@ func computeRanks(graph Graph, roots map[string]bool, ignoreExternals bool) map[
 					continue
 				}
 				inDegree[target]--
+				outDegree[node] = 0
 				if enqueued[target] {
 					continue
 				}
@@ -365,33 +369,34 @@ func computeRanks(graph Graph, roots map[string]bool, ignoreExternals bool) map[
 
 		if len(nextQueue) == 0 && len(ranks) < len(allNodes) {
 			minDirDepth := math.MaxInt32
-			minInDegree := math.MaxInt32
+			maxOutDegree := 0
 			found := false
 			for node := range allNodes {
 				depth := strings.Count(node, "/")
-				if _, ok := ranks[node]; !ok && !enqueued[node] && (depth < minDirDepth || depth == minDirDepth && inDegree[node] < minInDegree) {
+				if _, ok := ranks[node]; !ok && !enqueued[node] && (outDegree[node] > maxOutDegree || outDegree[node] == maxOutDegree && depth < minDirDepth) {
 					minDirDepth = depth
-					minInDegree = inDegree[node]
+					maxOutDegree = outDegree[node]
 					found = true
 				}
 			}
 			if !found {
 				continue
 			}
-			for minNode := range allNodes {
-				depth := strings.Count(minNode, "/")
-				if _, ok := ranks[minNode]; !ok && !enqueued[minNode] && depth == minDirDepth && inDegree[minNode] == minInDegree {
-					inDegree[minNode]--
-					if strings.HasPrefix(minNode, "..") {
-						ranks[minNode] = 9999
-						enqueued[minNode] = true
-						printRank(minNode, ranks[minNode])
+			for maxNode := range allNodes {
+				depth := strings.Count(maxNode, "/")
+				if _, ok := ranks[maxNode]; !ok && !enqueued[maxNode] && depth == minDirDepth && outDegree[maxNode] == maxOutDegree {
+					inDegree[maxNode]--
+					outDegree[maxNode] = 0
+					if strings.HasPrefix(maxNode, "..") {
+						ranks[maxNode] = 999999
+						enqueued[maxNode] = true
+						printRank(maxNode, ranks[maxNode])
 						continue
 					}
-					nextQueue = append(nextQueue, minNode)
-					ranks[minNode] = currentRank + 1
-					enqueued[minNode] = true
-					printRank(minNode, ranks[minNode])
+					nextQueue = append(nextQueue, maxNode)
+					ranks[maxNode] = currentRank + 1
+					enqueued[maxNode] = true
+					printRank(maxNode, ranks[maxNode])
 				}
 			}
 		}
@@ -403,10 +408,8 @@ func computeRanks(graph Graph, roots map[string]bool, ignoreExternals bool) map[
 	return ranks
 }
 
-func isBackEdge(graph Graph, ranks map[string]int, from, to string) bool {
-	fromRank := ranks[from]
-	toRank := ranks[to]
-	return toRank < fromRank
+func isBackEdge(ranks map[string]int, from, to string) bool {
+	return ranks[to] < ranks[from]
 }
 
 func printGraphviz(graph Graph, ignoreExternals bool) {
@@ -429,7 +432,7 @@ func printGraphviz(graph Graph, ignoreExternals bool) {
 
 	for _, rank := range rankGroupsKeys {
 		if nodes, ok := rankGroups[rank]; ok {
-			fmt.Printf("  { rank=same; ")
+			fmt.Printf("  /* %d */ { rank=same; ", rank)
 			for _, node := range nodes {
 				if roots[node] {
 					fmt.Printf(`"%s" [color=green style=filled fillcolor=lightgreen]; `, node)
@@ -456,7 +459,7 @@ func printGraphviz(graph Graph, ignoreExternals bool) {
 			if ignoreExternals && isExternalModule(to) {
 				continue
 			}
-			if isBackEdge(graph, ranks, from, to) {
+			if isBackEdge(ranks, from, to) {
 				fmt.Printf(`  "%s" -> "%s" [color=red style=dashed];`+"\n", from, to)
 			} else {
 				fmt.Printf(`  "%s" -> "%s";`+"\n", from, to)
