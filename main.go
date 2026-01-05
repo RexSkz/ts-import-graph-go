@@ -163,8 +163,8 @@ func isRelativeImport(path string) bool {
 	return strings.HasPrefix(path, "./") || strings.HasPrefix(path, "../")
 }
 
-func resolvePathAlias(root, fromFile, importPath string, paths map[string][]string, baseUrl string) string {
-	if paths == nil || len(paths) == 0 {
+func resolvePathAlias(root, importPath string, paths map[string][]string, baseUrl string) string {
+	if len(paths) == 0 {
 		return ""
 	}
 
@@ -217,7 +217,7 @@ func replaceAlias(importPath, aliasPattern, actualPath string) string {
 
 func resolveImport(root, fromFile, imp string, paths map[string][]string, baseUrl string) string {
 	// First try to resolve as path alias
-	if resolved := resolvePathAlias(root, fromFile, imp, paths, baseUrl); resolved != "" {
+	if resolved := resolvePathAlias(root, imp, paths, baseUrl); resolved != "" {
 		return resolved
 	}
 
