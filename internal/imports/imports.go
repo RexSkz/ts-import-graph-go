@@ -84,7 +84,7 @@ func loadTrimRules(root string) ([]trimRule, error) {
 
 	var config trimConfigFile
 	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse %s: %w", configPath, err)
 	}
 
 	if config.TrimLastDirConfig == nil {
