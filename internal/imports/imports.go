@@ -87,7 +87,7 @@ func loadTrimRules(root string) ([]trimRule, error) {
 		return nil, fmt.Errorf("failed to parse %s: %w", configPath, err)
 	}
 
-	if config.TrimLastDirConfig == nil {
+	if len(config.TrimLastDirConfig) == 0 {
 		return compileTrimRules(defaultTrimLastDirConfig)
 	}
 
