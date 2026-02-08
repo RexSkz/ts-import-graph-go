@@ -79,7 +79,7 @@ func loadTrimRules(root string) ([]trimRule, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return compileTrimRules(defaultTrimLastDirConfig)
 		}
-		return nil, err
+		return nil, fmt.Errorf("failed to read %s: %w", configPath, err)
 	}
 
 	var config trimConfigFile
