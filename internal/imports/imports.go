@@ -2,6 +2,8 @@ package imports
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -19,22 +21,37 @@ type Options struct {
 	BaseURL string
 }
 
-var trimLastDirConfig = []struct {
-	orig    string
-	replace string
-}{
-	{"((?:components|hooks|store|utils?)/[^/]+)(?:/.+)?$", "$1"},
+const trimConfigFileName = "ts-import-graph.json"
+
+type trimRuleConfig struct {
+	Orig    string `json:"orig"`
+	Replace string `json:"replace"`
 }
 
-var trimLastDirRe = compileTrimLastDirConfig()
+type trimConfigFile struct {
+	TrimLastDirConfig []trimRuleConfig `json:"trimLastDirConfig"`
+}
+
+type trimRule struct {
+	orig    *regexp.Regexp
+	replace string
+}
+
+var defaultTrimLastDirConfig = []trimRuleConfig{
+	{Orig: "((?:components|hooks|store|utils?)/[^/]+)(?:/.+)?$", Replace: "$1"},
+}
 
 var typeOnlyRe = regexp.MustCompile(`\btype\b`)
 
 func BuildGraph(root string, options Options) (graph.Graph, map[string]int, error) {
 	graphData := graph.New()
 	fileCounts := make(map[string]int)
+	trimRules, err := loadTrimRules(root)
+	if err != nil {
+		return nil, nil, err
+	}
 
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -42,7 +59,7 @@ func BuildGraph(root string, options Options) (graph.Graph, map[string]int, erro
 			return nil
 		}
 		if isTSFile(path) {
-			parseFile(root, path, graphData, options.Paths, options.BaseURL, fileCounts)
+			parseFile(root, path, graphData, options.Paths, options.BaseURL, fileCounts, trimRules)
 		}
 		return nil
 	})
@@ -54,31 +71,48 @@ func BuildGraph(root string, options Options) (graph.Graph, map[string]int, erro
 	return graphData, fileCounts, nil
 }
 
-func compileTrimLastDirConfig() []struct {
-	orig    *regexp.Regexp
-	replace string
-} {
-	compiled := make([]struct {
-		orig    *regexp.Regexp
-		replace string
-	}, 0, len(trimLastDirConfig))
-	for _, item := range trimLastDirConfig {
-		compiled = append(compiled, struct {
-			orig    *regexp.Regexp
-			replace string
-		}{
-			orig:    regexp.MustCompile(item.orig),
-			replace: item.replace,
+func loadTrimRules(root string) ([]trimRule, error) {
+	configPath := filepath.Join(root, trimConfigFileName)
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return compileTrimRules(defaultTrimLastDirConfig)
+		}
+		return nil, err
+	}
+
+	var config trimConfigFile
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+
+	if config.TrimLastDirConfig == nil {
+		return compileTrimRules(defaultTrimLastDirConfig)
+	}
+
+	return compileTrimRules(config.TrimLastDirConfig)
+}
+
+func compileTrimRules(config []trimRuleConfig) ([]trimRule, error) {
+	compiled := make([]trimRule, 0, len(config))
+	for _, item := range config {
+		compiledRule, err := regexp.Compile(item.Orig)
+		if err != nil {
+			return nil, err
+		}
+		compiled = append(compiled, trimRule{
+			orig:    compiledRule,
+			replace: item.Replace,
 		})
 	}
-	return compiled
+	return compiled, nil
 }
 
 func isTSFile(path string) bool {
 	return strings.HasSuffix(path, ".ts") || strings.HasSuffix(path, ".tsx")
 }
 
-func parseFile(root, filePath string, graphData graph.Graph, paths map[string][]string, baseURL string, fileCounts map[string]int) {
+func parseFile(root, filePath string, graphData graph.Graph, paths map[string][]string, baseURL string, fileCounts map[string]int, trimRules []trimRule) {
 	src, err := os.ReadFile(filePath)
 	if err != nil {
 		return
@@ -93,7 +127,7 @@ func parseFile(root, filePath string, graphData graph.Graph, paths map[string][]
 	}
 
 	relFrom, _ := filepath.Rel(root, filePath)
-	relFromModule := moduleName(relFrom)
+	relFromModule := moduleName(relFrom, trimRules)
 
 	graphData.EnsureNode(relFromModule)
 	fileCounts[relFromModule]++
@@ -135,7 +169,7 @@ func parseFile(root, filePath string, graphData graph.Graph, paths map[string][]
 			raw := string(src[cap.Node.StartByte()+1 : cap.Node.EndByte()-1])
 			to := resolveImport(root, filePath, raw, paths, baseURL)
 			if to != "" {
-				toModule := moduleName(to)
+				toModule := moduleName(to, trimRules)
 				if toModule != relFromModule && graphData.AddEdge(relFromModule, toModule) {
 					printEdge(relFromModule, toModule)
 				}
@@ -228,9 +262,9 @@ func normalizePath(path string) string {
 	return strings.ReplaceAll(path, "\\", "/")
 }
 
-func moduleName(path string) string {
+func moduleName(path string, trimRules []trimRule) string {
 	result := normalizePath(path)
-	for _, item := range trimLastDirRe {
+	for _, item := range trimRules {
 		result = item.orig.ReplaceAllString(result, item.replace)
 	}
 	return result

@@ -1,0 +1,8 @@
+{
+  "trimLastDirConfig": [
+    {
+      "orig": "((?:components|hooks|store|utils?)/[^/]+)(?:/.+)?$",
+      "replace": "$1"
+    }
+  ]
+}
