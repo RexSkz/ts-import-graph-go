@@ -49,7 +49,7 @@ func BuildGraph(root string, options Options) (graph.Graph, map[string]int, erro
 	fileCounts := make(map[string]int)
 	trimRules, err := loadTrimRules(root)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to load trim rules: %w", err)
 	}
 
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
