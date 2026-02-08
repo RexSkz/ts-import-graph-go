@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -98,7 +99,7 @@ func compileTrimRules(config []trimRuleConfig) ([]trimRule, error) {
 	for _, item := range config {
 		compiledRule, err := regexp.Compile(item.Orig)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("invalid trim rule pattern %q: %w", item.Orig, err)
 		}
 		compiled = append(compiled, trimRule{
 			orig:    compiledRule,
