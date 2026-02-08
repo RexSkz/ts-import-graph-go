@@ -43,11 +43,9 @@ func parseArgs(args []string) (bool, bool, string) {
 	for _, arg := range args {
 		if arg == "--ignore-externals" {
 			ignoreExternals = true
-			continue
 		}
 		if arg == "--print-file-count" {
 			printFileCount = true
-			continue
 		}
 		if strings.HasPrefix(arg, "--format=") {
 			format = strings.TrimPrefix(arg, "--format=")
